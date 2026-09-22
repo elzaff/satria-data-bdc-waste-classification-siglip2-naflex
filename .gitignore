@@ -1,0 +1,16 @@
+# Dataset and local run products
+BDC2026/
+data/
+results/
+*.npz
+*.pt
+*.joblib
+*.safetensors
+
+# Python and local credentials
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
