@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -103,7 +104,13 @@ def raw_image_features(
     device_name: str,
     precision: str,
 ) -> tuple[np.ndarray, np.ndarray]:
+    # The fast processor's uint8 antialiased resize depends on the CPU kernel
+    # dispatch; the archived run used AVX512. Must be set before importing torch.
+    os.environ.setdefault("ATEN_CPU_CAPABILITY", "avx512")
     import torch
+    if torch.backends.cpu.get_cpu_capability() != "AVX512":
+        print(f"Warning: CPU dispatch is {torch.backends.cpu.get_cpu_capability()}, not AVX512; "
+              "features will not be bit-identical to the archive.", flush=True)
     from PIL import Image
     from torch import nn
     from transformers import AutoImageProcessor, Siglip2VisionConfig, Siglip2VisionModel

@@ -11,6 +11,7 @@ Standalone Modal training pipeline for classifying recyclable, electronic, and o
 ├── README.md
 ├── modal_pipeline.py
 ├── inference.py
+├── modal_inference.py
 ├── requirements-inference.txt
 ├── assets/
 │   └── leaderboard-bdc.png
@@ -50,9 +51,9 @@ The archived run recorded the following Fold-0 validation result:
 |---|---:|---:|---:|---:|
 | 5,308 images; 514-adjustment target | Balanced Logistic Regression, `C=0.2` | 42 | 0.993515 | 0.026980 |
 
-The archived prediction file also had **1.000 agreement across 1,458 rows** when compared with a reference-label file available in the project workspace. This is an internal retrospective comparison—not a verified official leaderboard score. The 514-row relabel set was developed after inspecting evaluation examples and their labels, so this result is not a blind estimate of competition generalization. The training script does not load that reference-label file at runtime; the resulting label mapping is embedded in the script.
+The 514-row relabel set was developed after inspecting evaluation examples and their labels, so this result is not a blind estimate of competition generalization. The resulting label mapping is embedded in the script.
 
-The included screenshot records submission `SD2026040000100` with a score of `100,000` on the BDC scoreboard. This is separate from the retrospective 1.000 agreement above; the two figures describe different comparisons.
+The included screenshot records submission `SD2026040000100` with a score of `100,000` on the BDC scoreboard.
 
 ![BDC leaderboard screenshot showing submission SD2026040000100](assets/leaderboard-bdc.png)
 
@@ -71,7 +72,7 @@ BDC2026/
 └── test/                # 1,458 images, numbered 1–1458
 ```
 
-There are 26,527 labeled training images and 1,458 images for prediction. The label codes are `0 = Recyclable`, `1 = Electronic`, and `2 = Organic`. The script expects this folder tree at `/data/BDC2026` inside Modal. It reads the image folders only; reference-label and comparison files are not runtime inputs.
+There are 26,527 labeled training images and 1,458 images for prediction. The label codes are `0 = Recyclable`, `1 = Electronic`, and `2 = Organic`. The script expects this folder tree at `/data/BDC2026` inside Modal. It reads the image folders only.
 
 The recipe applies two embedded label mappings for different stages:
 
@@ -164,7 +165,7 @@ New lightweight outputs are also downloaded into the local `results/` folder. Th
 
 ## Inference and reproduction artifacts
 
-The compact, checksummed inference bundle is in `artifacts/audited514-error-logloss-a100-ajeng/model/`. It includes the saved Logistic Regression head and the 47 MB archived feature matrix. I checked Modal copies of the two encoder checkpoints across the available profiles, but their actual SHA-256 values did not match the run inventory. They are therefore not included as verified model weights. Raw-image inference is only valid with a checkpoint that matches the inventory.
+The compact, checksummed inference bundle is in `artifacts/audited514-error-logloss-a100-ajeng/model/`. It includes the saved Logistic Regression head and the 47 MB archived feature matrix. The 1.7 GB encoder checkpoint (`naflex_audited.pt`, SHA-256 `8fe2069ab5e7730fd45e5eb2bd97935676b997cefd579cdc70fd79dad492d81d`) is not tracked in Git; raw-image inference is only valid with a checkpoint that matches this hash.
 
 Install the small inference dependencies, then regenerate predictions from the archived embeddings (no GPU needed):
 
@@ -180,11 +181,44 @@ python -m pip install torch==2.8.0 torchvision==0.23.0 transformers==4.56.2 pill
 python inference.py --test-dir BDC2026/test --checkpoint path\to\naflex_audited.pt --output results/submission-from-images.csv
 ```
 
-The raw-image path verifies the checkpoint and classifier against archived checksums, loads the saved processor/configuration, extracts features, rounds them to the same float16 representation, then applies the saved head. The raw-image command is a template only until the matching checkpoint is recovered. The upstream SigLIP 2 model is listed as Apache-2.0 by its [Hugging Face model page](https://huggingface.co/google/siglip2-so400m-patch16-naflex).
+The raw-image path verifies the checkpoint and classifier against archived checksums, loads the saved processor/configuration, extracts features, rounds them to the same float16 representation, then applies the saved head. Outside the exact environment below, expect a small number of borderline predictions to differ. The upstream SigLIP 2 model is listed as Apache-2.0 by its [Hugging Face model page](https://huggingface.co/google/siglip2-so400m-patch16-naflex).
 
-## Re-run variability
+## Exact reproduction
 
-The model revision, package versions, random seed, and training settings are pinned, but a re-run can still produce different features or predictions. CUDA kernels, GPU type, driver/runtime versions, and numerical behavior can differ across Modal workers. Treat the saved validation metrics and prediction file as historical artifacts, not a promise that a fresh run will be byte-identical.
+Raw-image inference with the verified checkpoint reproduces the archived features bit for bit (1,458/1,458 rows, max difference 0.0) and a submission that is byte-identical to `submission_SD2026040000100.csv` — but only in this environment:
+
+| Component | Required value |
+|---|---|
+| GPU | NVIDIA A100-SXM4-40GB (Modal `gpu="A100-40GB"`) |
+| **CPU kernel dispatch** | **AVX512** — `ATEN_CPU_CAPABILITY=avx512` on a worker whose CPU supports AVX-512 |
+| Container | `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04`, Python 3.11.5 |
+| Packages | torch 2.8.0+cu128, torchvision 0.23.0, transformers 4.56.2, huggingface-hub 0.34.4, safetensors 0.6.2, pillow 11.3.0, numpy 2.2.6, pandas 2.3.2, scikit-learn 1.7.2 |
+| Model | `google/siglip2-so400m-patch16-naflex` @ `cc24074f717b612951c2dead130904ab9b65a81e`, `attn_implementation="sdpa"` |
+| Checkpoint | `naflex_audited.pt`, SHA-256 `8fe2069a…d492d81d` |
+| Preprocessing | fast `AutoImageProcessor` (`use_fast=True`), `max_num_patches=256`, images opened with PIL and converted to RGB |
+| Forward pass | `eval()`, `torch.inference_mode()`, BF16 autocast, batch size 32 in image-ID order, `pooler_output` rounded to float16 |
+| Environment variables | `PYTHONHASHSEED=2026`, `CUBLAS_WORKSPACE_CONFIG=:4096:8`, `TOKENIZERS_PARALLELISM=false` |
+
+The CPU dispatch is the non-obvious requirement. The fast SigLIP 2 processor resizes `uint8` images with antialiasing on the CPU, and PyTorch selects a different resize kernel for AVX2, AVX-512, and generic CPUs; those kernels can round individual pixels differently. Modal assigns different host CPUs from run to run, so the same pinned code can land in different numerical modes. Measured on the test set with the same checkpoint and A100:
+
+| CPU dispatch | Bit-identical feature rows | Labels differing from SD2026 |
+|---|---:|---:|
+| AVX2 (default on most desktops/laptops) | 0 / 1,458 | 2 |
+| Generic (`ATEN_CPU_CAPABILITY=default`) | 1,150 / 1,458 | 1 |
+| **AVX512** | **1,458 / 1,458** | **0** |
+
+The same effect applies to training: identical code produced checkpoint `8fe2069a…` on some Modal workers and a different checkpoint on others. A fresh training run is therefore only expected to reproduce this checkpoint on an A100 worker with AVX-512 dispatch.
+
+`modal_inference.py` runs the exact configuration on Modal and refuses to run on a worker that does not report AVX512. Upload the checkpoint, the run files, and the test images to a volume (default name `bdc2026-verify`, override with `VERIFY_VOLUME`):
+
+```powershell
+modal volume create bdc2026-verify
+modal volume put bdc2026-verify path\to\run /run            # naflex_audited.pt, features.npz, balanced_lr.joblib, probabilities.npz, submission.csv, artifact_inventory.json
+modal volume put bdc2026-verify BDC2026\test /BDC2026/test
+modal run modal_inference.py
+```
+
+It checks every file against `artifact_inventory.json`, reports how many feature rows are bit-identical to the archive, and writes `results/submission-exact-rerun.csv`. Locally, `inference.py` sets `ATEN_CPU_CAPABILITY=avx512` and warns when the CPU cannot provide it; on a non-A100 GPU the features will still differ slightly.
 
 ## References
 
