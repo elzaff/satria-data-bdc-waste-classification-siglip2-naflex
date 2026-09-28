@@ -6,6 +6,13 @@ results/
 *.pt
 *.joblib
 *.safetensors
+attachments/
+**/.cache/
+
+# The compact, checksummed inference bundle is intentionally versioned.
+!artifacts/audited514-error-logloss-a100-ajeng/model/
+!artifacts/audited514-error-logloss-a100-ajeng/model/**
+artifacts/audited514-error-logloss-a100-ajeng/model/.cache/
 
 # Python and local credentials
 __pycache__/

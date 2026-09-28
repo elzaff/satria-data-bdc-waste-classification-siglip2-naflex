@@ -9,17 +9,36 @@ Standalone Modal training pipeline for classifying recyclable, electronic, and o
 ├── .gitignore
 ├── README.md
 ├── modal_pipeline.py
+├── inference.py
+├── requirements-inference.txt
 ├── assets/
 │   └── leaderboard-bdc.png
 └── artifacts/
-    └── audited514-error-logloss-a100-ajeng/
-        ├── logs/
-        │   ├── metrics.json
-        │   ├── run_metadata.json
-        │   ├── training_history.jsonl
-        │   └── validation_head_ablation.tsv
-        └── submissions/
-            └── submission_SD2026040000100.csv
+    ├── audited514-error-logloss-a100-ajeng/
+    │   ├── logs/
+    │   │   ├── metrics.json
+    │   │   ├── run_metadata.json
+    │   │   ├── training_history.jsonl
+    │   │   └── validation_head_ablation.tsv
+    │   ├── submissions/
+    │   │   └── submission_SD2026040000100.csv
+    │   └── model/
+    │       ├── README.md
+    │       ├── config.json
+    │       ├── preprocessor_config.json
+    │       ├── balanced_lr.joblib
+    │       ├── features.npz
+    │       ├── probabilities.npz
+    │       ├── manifest_audited_final.csv
+    │       ├── manifest_changes.csv
+    │       ├── pipeline_snapshot.py
+    │       ├── submission.csv
+    │       ├── metrics.json
+    │       ├── run_metadata.json
+    │       ├── training_history.jsonl
+    │       ├── validation_head_ablation.tsv
+    │       ├── artifact_checksums.sha256
+    │       └── artifact_inventory.json
 ```
 
 ## Result and how to interpret it
@@ -140,7 +159,27 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 modal app logs satria-data-bdc-waste-classification-siglip2-naflex --tail 1000 --timestamps > "artifacts\audited514-error-logloss-a100-ajeng\logs\modal-console-$stamp.log"
 ```
 
-New lightweight outputs are also downloaded into the local `results/` folder. The larger encoder checkpoints and feature matrix remain in the Modal volume under this recipe's dedicated output path. `results/`, dataset files, secrets, checkpoints, and feature arrays are excluded by `.gitignore`.
+New lightweight outputs are also downloaded into the local `results/` folder. The compact feature matrix and classifier used to reproduce the archived predictions are included in the tracked inference bundle. Dataset files, local results, and unverified large checkpoint downloads are excluded by `.gitignore`.
+
+## Inference and reproduction artifacts
+
+The compact, checksummed inference bundle is in `artifacts/audited514-error-logloss-a100-ajeng/model/`. It includes the saved Logistic Regression head and the 47 MB archived feature matrix. I checked Modal copies of the two encoder checkpoints across the available profiles, but their actual SHA-256 values did not match the run inventory. They are therefore not included as verified model weights. Raw-image inference is only valid with a checkpoint that matches the inventory.
+
+Install the small inference dependencies, then regenerate predictions from the archived embeddings (no GPU needed):
+
+```powershell
+python -m pip install -r requirements-inference.txt
+python inference.py --output results/submission-from-archived-features.csv
+```
+
+This path was checked against the archived submission: all 1,458 predicted labels match exactly. For raw-image inference, provide a checkpoint whose SHA-256 matches `artifact_inventory.json`:
+
+```powershell
+python -m pip install torch==2.8.0 torchvision==0.23.0 transformers==4.56.2 pillow==11.3.0
+python inference.py --test-dir BDC2026/test --checkpoint path\to\naflex_audited.pt --output results/submission-from-images.csv
+```
+
+The raw-image path verifies the checkpoint and classifier against archived checksums, loads the saved processor/configuration, extracts features, rounds them to the same float16 representation, then applies the saved head. The raw-image command is a template only until the matching checkpoint is recovered. The upstream SigLIP 2 model is listed as Apache-2.0 by its [Hugging Face model page](https://huggingface.co/google/siglip2-so400m-patch16-naflex).
 
 ## Re-run variability
 
