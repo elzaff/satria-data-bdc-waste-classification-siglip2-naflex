@@ -3,6 +3,13 @@
 
 Standalone Modal training pipeline for classifying recyclable, electronic, and organic waste images. The repository contains the training script, run instructions, and a small archive of the selected run; the image dataset and model checkpoints are not included.
 
+> [!CAUTION]
+> **Reproducing the archived result (retraining or raw-image inference) requires the exact environment — not just the same code.**
+>
+> Run on an **NVIDIA A100-SXM4-40GB** worker whose CPU supports **AVX-512**, with `ATEN_CPU_CAPABILITY=avx512`, the pinned container `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04` (Python 3.11.5), and the pinned packages (torch 2.8.0+cu128, torchvision 0.23.0, transformers 4.56.2, pillow 11.3.0, numpy 2.2.6, scikit-learn 1.7.2). Full list: [Exact reproduction](#exact-reproduction).
+>
+> The CPU kernel dispatch changes how images are resized before they reach the model. With identical code, seeds, and package versions, retraining on a worker with a different dispatch produced a **different checkpoint** (`502d8594…` instead of `8fe2069a…`) and a **different submission** (3 of 1,458 labels changed). Modal does not let you choose the host CPU, so check the reported dispatch on every run and discard runs that are not AVX512.
+
 ## Repository layout
 
 ```text
@@ -129,6 +136,15 @@ Create the Hugging Face secret expected by the script (or add the same `HF_TOKEN
 ```powershell
 modal secret create huggingface-secret HF_TOKEN=hf_your_token
 ```
+
+> [!WARNING]
+> **Before retraining: a run only reproduces the archived checkpoint if the environment matches exactly.**
+>
+> - GPU: `A100-40GB` (A100-SXM4-40GB). Do not change the `gpu=` argument.
+> - CPU dispatch: **AVX512**. `modal_pipeline.py` sets `ATEN_CPU_CAPABILITY=avx512`, but that only takes effect when the worker's CPU supports AVX-512. Modal assigns host CPUs per run.
+> - Container and packages: leave the pinned `image` definition in `modal_pipeline.py` unchanged.
+>
+> After the run, compare the SHA-256 of `naflex_audited.pt` with `8fe2069ab5e7730fd45e5eb2bd97935676b997cefd579cdc70fd79dad492d81d`. If it differs, the run landed on a different numerical path: its features, `C` selection, and predictions are not the archived result, even though the code is identical. Retraining on AVX-512 has not been re-verified end to end; the archived July runs that produced `8fe2069a…` are consistent with it, and inference from that checkpoint is only bit-exact under AVX512.
 
 Then start the run:
 

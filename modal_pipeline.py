@@ -1469,7 +1469,7 @@ image = (
         "huggingface-hub==0.34.4", "safetensors==0.6.2",
         "scikit-learn==1.7.2", "pandas==2.3.2", "numpy==2.2.6", "pillow==11.3.0",
     )
-    .env({"HF_HOME": HF_CACHE, "TOKENIZERS_PARALLELISM": "false", "PYTHONHASHSEED": str(SEED), "CUBLAS_WORKSPACE_CONFIG": ":4096:8"})
+    .env({"HF_HOME": HF_CACHE, "TOKENIZERS_PARALLELISM": "false", "PYTHONHASHSEED": str(SEED), "CUBLAS_WORKSPACE_CONFIG": ":4096:8", "ATEN_CPU_CAPABILITY": "avx512"})
 )
 data_volume = modal.Volume.from_name("bdc2026-data", create_if_missing=True)
 cache_volume = modal.Volume.from_name("bdc2026-model-cache", create_if_missing=True)
