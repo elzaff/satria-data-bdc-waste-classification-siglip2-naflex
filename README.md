@@ -1,4 +1,5 @@
 # SATRIA DATA BDC Waste Classification with SigLIP 2 NaFlex
+[![Hasil Model](https://img.shields.io/badge/Hasil%20Model-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/drive/folders/1HqgH6jOyKvGx2DrG9LYS7nvSQ2ghbVZ-?usp=sharing)
 
 Standalone Modal training pipeline for classifying recyclable, electronic, and organic waste images. The repository contains the training script, run instructions, and a small archive of the selected run; the image dataset and model checkpoints are not included.
 
