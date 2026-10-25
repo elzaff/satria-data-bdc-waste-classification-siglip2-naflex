@@ -925,6 +925,10 @@ def discover_dataset(root):
     }
     if not all(folder.is_dir() for folder in folders.values()):
         raise FileNotFoundError(f"Raw BDC2026 train folders not found under {root}")
+    # Precomputed SHA-256 groups skip re-reading 26k files from the volume on the GPU worker.
+    groups_file = root.parent / "BDC2026_groups.csv"
+    known = pd.read_csv(groups_file).set_index("path")["group"].to_dict() if groups_file.is_file() else {}
+    print(f"SHA-256 groups: {len(known)} from {groups_file}" if known else "SHA-256 groups: hashing files", flush=True)
     rows = []
     for label, folder in folders.items():
         for path in sorted(item for item in folder.iterdir() if item.is_file()):
@@ -933,7 +937,7 @@ def discover_dataset(root):
                     "path": str(path),
                     "filename": path.name,
                     "original_label": label,
-                    "group": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "group": known[str(path)] if known else hashlib.sha256(path.read_bytes()).hexdigest(),
                 }
             )
     manifest = pd.DataFrame(rows)
@@ -1469,7 +1473,7 @@ image = (
         "huggingface-hub==0.34.4", "safetensors==0.6.2",
         "scikit-learn==1.7.2", "pandas==2.3.2", "numpy==2.2.6", "pillow==11.3.0",
     )
-    .env({"HF_HOME": HF_CACHE, "TOKENIZERS_PARALLELISM": "false", "PYTHONHASHSEED": str(SEED), "CUBLAS_WORKSPACE_CONFIG": ":4096:8", "ATEN_CPU_CAPABILITY": "avx512"})
+    .env({"HF_HOME": HF_CACHE, "TOKENIZERS_PARALLELISM": "false", "PYTHONHASHSEED": str(SEED), "CUBLAS_WORKSPACE_CONFIG": ":4096:8"})
 )
 data_volume = modal.Volume.from_name("bdc2026-data", create_if_missing=True)
 cache_volume = modal.Volume.from_name("bdc2026-model-cache", create_if_missing=True)
@@ -1488,8 +1492,18 @@ def smoke_import():
     volumes={"/data": data_volume, "/cache": cache_volume}, secrets=[hf_secret],
 )
 def train_clean(force: bool = False):
+    import hashlib
     import shutil
 
+    import torch
+
+    # ATEN_CPU_CAPABILITY must stay unset: forcing it makes torch report (and run) AVX512 on any host.
+    if "ATEN_CPU_CAPABILITY" in os.environ:
+        raise RuntimeError("Unset ATEN_CPU_CAPABILITY; the guard below needs torch's own CPU detection.")
+    capability = torch.backends.cpu.get_cpu_capability()
+    print("CPU dispatch:", capability, "| GPU:", torch.cuda.get_device_name(0))
+    if capability != "AVX512":
+        raise RuntimeError(f"Exact reproduction needs a host that detects AVX512; this worker detects {capability}. Re-run.")
     output = Path(OUTPUT_ROOT)
     if (output / "metrics.json").is_file() and (output / "probabilities.npz").is_file() and not force:
         report = json.loads((output / "metrics.json").read_text(encoding="utf-8"))
@@ -1508,6 +1522,9 @@ def train_clean(force: bool = False):
     shutil.copy2(Path(__file__), output / "pipeline_snapshot.py")
     report = run_pipeline("/data/BDC2026", output, checkpoint_commit=cache_volume.commit)
     cache_volume.commit()
+    with open(output / "naflex_audited.pt", "rb") as handle:
+        report["naflex_audited_sha256"] = hashlib.file_digest(handle, "sha256").hexdigest()
+    print("naflex_audited.pt sha256:", report["naflex_audited_sha256"], "(archived: 8fe2069a...d492d81d)")
     return {
         "report": report,
         "remote_root": str(output),
