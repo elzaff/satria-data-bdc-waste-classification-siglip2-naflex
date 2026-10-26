@@ -1,8 +1,9 @@
 """Bit-exact raw-image inference for the archived Audited514 run on Modal.
 
 Mirrors pipeline_snapshot.py (image, GPU, model construction, bf16 autocast,
-batch 32, float16 rounding) and pins the CPU kernel dispatch to AVX512, which
-controls the uint8 antialiased resize inside the fast SigLIP 2 processor.
+batch 32, float16 rounding) and refuses hosts whose native CPU kernel dispatch
+is not AVX512, which controls the uint8 antialiased resize inside the fast
+SigLIP 2 processor.
 
 Expected volume layout (default volume name: bdc2026-verify):
   /run/naflex_audited.pt, features.npz, balanced_lr.joblib, probabilities.npz,
@@ -29,7 +30,7 @@ image = (
         "huggingface-hub==0.34.4", "safetensors==0.6.2",
         "scikit-learn==1.7.2", "pandas==2.3.2", "numpy==2.2.6", "pillow==11.3.0",
     )
-    .env({"HF_HOME": "/cache/huggingface", "TOKENIZERS_PARALLELISM": "false", "PYTHONHASHSEED": str(SEED), "CUBLAS_WORKSPACE_CONFIG": ":4096:8", "ATEN_CPU_CAPABILITY": "avx512"})
+    .env({"HF_HOME": "/cache/huggingface", "TOKENIZERS_PARALLELISM": "false", "PYTHONHASHSEED": str(SEED), "CUBLAS_WORKSPACE_CONFIG": ":4096:8"})
 )
 cache_volume = modal.Volume.from_name(os.environ.get("VERIFY_VOLUME", "bdc2026-verify"))
 app = modal.App("satria-data-bdc-siglip2-naflex-exact-inference")
@@ -54,9 +55,12 @@ def verify_and_infer():
     from torch.utils.data import DataLoader, Dataset
     from transformers import AutoImageProcessor, Siglip2VisionModel
 
+    # ATEN_CPU_CAPABILITY must stay unset: forcing it makes torch report (and run) AVX512 on any host.
+    if "ATEN_CPU_CAPABILITY" in os.environ:
+        raise RuntimeError("Unset ATEN_CPU_CAPABILITY; the guard below needs torch's own CPU detection.")
     if torch.backends.cpu.get_cpu_capability() != "AVX512":
-        raise RuntimeError("Bit-exact features need an AVX512 host; this worker "
-                           f"reports {torch.backends.cpu.get_cpu_capability()}. Re-run.")
+        raise RuntimeError("Bit-exact features need a host that detects AVX512; this worker "
+                           f"detects {torch.backends.cpu.get_cpu_capability()}. Re-run.")
 
     # 1. Checksums of every file in the original run directory.
     inventory = json.loads((RUN / "artifact_inventory.json").read_text())

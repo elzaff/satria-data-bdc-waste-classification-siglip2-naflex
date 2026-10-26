@@ -105,8 +105,10 @@ def raw_image_features(
     precision: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     # The fast processor's uint8 antialiased resize depends on the CPU kernel
-    # dispatch; the archived run used AVX512. Must be set before importing torch.
-    os.environ.setdefault("ATEN_CPU_CAPABILITY", "avx512")
+    # dispatch; the archived run used AVX512 as detected natively. Forcing
+    # ATEN_CPU_CAPABILITY makes torch report (and run) that ISA on any CPU, so it must stay unset.
+    if "ATEN_CPU_CAPABILITY" in os.environ:
+        raise RuntimeError("Unset ATEN_CPU_CAPABILITY; the dispatch check below needs torch's own CPU detection.")
     import torch
     if torch.backends.cpu.get_cpu_capability() != "AVX512":
         print(f"Warning: CPU dispatch is {torch.backends.cpu.get_cpu_capability()}, not AVX512; "
